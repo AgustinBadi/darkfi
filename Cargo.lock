@@ -1171,6 +1171,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "darkfi-consensus-contract"
+version = "0.4.0"
+dependencies = [
+ "async-std",
+ "darkfi",
+ "darkfi-money-contract",
+ "darkfi-sdk",
+ "darkfi-serial",
+ "getrandom",
+ "halo2_proofs",
+ "log",
+ "rand",
+ "simplelog",
+ "sled",
+]
+
+[[package]]
 name = "darkfi-dao-contract"
 version = "0.4.0"
 dependencies = [

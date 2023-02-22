@@ -1,0 +1,52 @@
+constant "Consensus_Mint_V1" {
+	EcFixedPointShort VALUE_COMMIT_VALUE,
+	EcFixedPoint VALUE_COMMIT_RANDOM,
+	EcFixedPointBase NULLIFIER_K,
+}
+
+contract "Consensus_Mint_V1" {
+    # Coin secret key
+	Base sk,
+	# Merkle root of the coin secret key
+	Base sk_root,
+	# Coin creation slot
+	Base slot,
+	# Coin nonce
+	Base rho,
+	# Random blinding factor for coin commitment
+	Scalar openning,
+	# The value of this coin
+	Base value,
+	# Random blinding factor for value commitment
+	Scalar value_blind,
+}
+
+circuit "Consensus_Mint_V1" {
+    # Constant witnesses
+	ZERO = witness_base(0);
+	PREFIX_CM = witness_base(4);
+	PREFIX_PK = witness_base(5);
+
+	# Pedersen commitment for coin's value
+	vcv = ec_mul_short(value, VALUE_COMMIT_VALUE);
+	vcr = ec_mul(value_blind, VALUE_COMMIT_RANDOM);
+	value_commit = ec_add(vcv, vcr);
+	# Since value_commit is a curve point, we fetch its coordinates
+	# and constrain them:
+	constrain_instance(ec_get_x(value_commit));
+	constrain_instance(ec_get_y(value_commit));
+
+	# Coin private key hash
+	pk = poseidon_hash(PREFIX_PK, sk_root, slot, ZERO);
+	constrain_instance(pk);
+
+	# Coin commitment
+	cm_msg = poseidon_hash(PREFIX_CM, pk, value, rho);
+	cm_v = ec_mul_base(cm_msg, NULLIFIER_K);
+	cm_r = ec_mul(openning, VALUE_COMMIT_RANDOM);
+	cm = ec_add(cm_v, cm_r);
+	cm_x = ec_get_x(cm);
+	cm_y = ec_get_y(cm);
+	cm_hash = poseidon_hash(cm_x, cm_y);
+	constrain_instance(cm_hash);
+}
