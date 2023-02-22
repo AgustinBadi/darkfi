@@ -70,7 +70,7 @@ async fn consensus_contract_stake_unstake() -> Result<()> {
         &th.faucet_kp,
         &th.alice_kp.public,
         ALICE_INITIAL,
-        DARK_TOKEN_ID.clone(),
+        *DARK_TOKEN_ID,
         spend_hook,
         user_data,
         user_data_blind,

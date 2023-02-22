@@ -29,7 +29,7 @@ use darkfi::{
     consensus::LeadCoin as ConsensusCoin,
     zk::{Proof, ProvingKey, Witness, ZkCircuit},
     zkas::ZkBinary,
-    Result,
+    ClientFailed, Result,
 };
 use darkfi_money_contract::{
     client::{create_transfer_burn_proof, create_transfer_mint_proof, Note, OwnCoin},
@@ -41,6 +41,7 @@ use darkfi_sdk::crypto::{
     DARK_TOKEN_ID,
 };
 use halo2_proofs::circuit::Value;
+use log::error;
 use rand::rngs::OsRng;
 
 use crate::model::{ConsensusStakeParams, ConsensusUnstakeParams, StakedInput, StakedOutput};
@@ -241,7 +242,6 @@ pub fn build_stake_tx(
     Vec<ValueBlind>,
     Vec<ValueBlind>,
 )> {
-    // TODO: verify this token blind usage
     let token_blind = ValueBlind::random(&mut OsRng);
     let mut consensus_coins: Vec<ConsensusCoin> = vec![];
     let mut params = ConsensusStakeParams { inputs: vec![], outputs: vec![], token_blind };
@@ -251,6 +251,13 @@ pub fn build_stake_tx(
     // I assumed this vec will contain a secret key for each clear input and anonymous input.
     let mut signature_secrets = vec![];
     for coin in coins.iter() {
+        // Skip OwnCoins that are not DARK_TOKEN_ID
+        if coin.note.token_id != *DARK_TOKEN_ID {
+            let error = "Tried to stake non-native token. Unable to proceed";
+            error!(target: "consensus", "Consensus::build_stake_tx(): {}", error);
+            return Err(ClientFailed::VerifyError(error.to_string()).into())
+        }
+
         // Burning own coin
         let value_blind = ValueBlind::random(&mut OsRng);
         own_blinds.push(value_blind);
@@ -268,7 +275,7 @@ pub fn build_stake_tx(
             coin.note.value,
             coin.note.token_id,
             coin.note.value_blind,
-            coin.note.token_blind,
+            token_blind,
             coin.note.serial,
             spend_hook,
             user_data,
@@ -407,7 +414,7 @@ pub fn build_unstake_tx(
             mint_zkbin,
             mint_pk,
             coin.value,
-            DARK_TOKEN_ID.clone(),
+            *DARK_TOKEN_ID,
             own_value_blind,
             token_recv_blind,
             serial,
@@ -421,7 +428,7 @@ pub fn build_unstake_tx(
         let note = Note {
             serial,
             value: coin.value,
-            token_id: DARK_TOKEN_ID.clone(),
+            token_id: *DARK_TOKEN_ID,
             spend_hook: pallas::Base::zero(),
             user_data: pallas::Base::zero(),
             coin_blind,

@@ -20,7 +20,7 @@
 use darkfi_sdk::{
     crypto::{
         pallas, pasta_prelude::*, pedersen_commitment_base, Coin, ContractId, MerkleNode,
-        PublicKey, DARK_TOKEN_ID,
+        PublicKey, DARK_TOKEN_ID, MONEY_CONTRACT_ID,
     },
     db::{db_contains_key, db_init, db_lookup, db_set, SMART_CONTRACT_ZKAS_DB_NAME},
     error::ContractResult,
@@ -34,7 +34,10 @@ use darkfi_sdk::error::ContractError;
 use darkfi_serial::{deserialize, serialize, Encodable, WriteExt};
 
 #[cfg(not(feature = "no-entrypoint"))]
-use darkfi_money_contract::{MONEY_CONTRACT_ZKAS_BURN_NS_V1, MONEY_CONTRACT_ZKAS_MINT_NS_V1};
+use darkfi_money_contract::{
+    MONEY_CONTRACT_COIN_ROOTS_TREE, MONEY_CONTRACT_NULLIFIERS_TREE, MONEY_CONTRACT_ZKAS_BURN_NS_V1,
+    MONEY_CONTRACT_ZKAS_MINT_NS_V1,
+};
 
 /// Functions we allow in this contract
 #[repr(u8)]
@@ -263,8 +266,9 @@ fn process_instruction(cid: ContractId, ix: &[u8]) -> ContractResult {
                 return Err(ContractError::Custom(26))
             }
 
-            let nullifiers_db = db_lookup(cid, CONSENSUS_CONTRACT_NULLIFIERS_TREE)?;
-            let coin_roots_db = db_lookup(cid, CONSENSUS_CONTRACT_ROOTS_TREE)?;
+            let money_cid = *MONEY_CONTRACT_ID;
+            let coin_roots_db = db_lookup(money_cid, MONEY_CONTRACT_COIN_ROOTS_TREE)?;
+            let nullifiers_db = db_lookup(money_cid, MONEY_CONTRACT_NULLIFIERS_TREE)?;
 
             // Accumulator for the value commitments
             let mut valcom_total = pallas::Point::identity();
