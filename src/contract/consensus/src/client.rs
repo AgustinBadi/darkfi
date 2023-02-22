@@ -36,9 +36,9 @@ use darkfi_money_contract::{
     model::{Input, Output},
 };
 use darkfi_sdk::crypto::{
-    merkle_prelude::*, pallas, pasta_prelude::*, pedersen_commitment_base, poseidon_hash,
-    MerkleNode, MerklePosition, MerkleTree, PublicKey, SecretKey, ValueBlind, ValueCommit,
-    DARK_TOKEN_ID,
+    merkle_prelude::*, pallas, pasta_prelude::*, pedersen_commitment_base, pedersen_commitment_u64,
+    poseidon_hash, MerkleNode, MerklePosition, MerkleTree, PublicKey, SecretKey, ValueBlind,
+    ValueCommit, DARK_TOKEN_ID,
 };
 use halo2_proofs::circuit::Value;
 use log::error;
@@ -61,12 +61,12 @@ struct ConsensusMintRevealed {
 impl ConsensusMintRevealed {
     /// Generate the public inputs of consensus mint proof
     pub fn compute(
-        value: pallas::Base,
+        value: u64,
         pk: pallas::Base,
         value_blind: pallas::Scalar,
         commitment: pallas::Point,
     ) -> Self {
-        let value_commit = pedersen_commitment_base(value, value_blind);
+        let value_commit = pedersen_commitment_u64(value, value_blind);
         let coord = commitment.to_affine().coordinates().unwrap();
         Self { value_commit, pk, commitment_x: *coord.x(), commitment_y: *coord.y() }
     }
@@ -86,7 +86,7 @@ fn create_consensus_mint_proof(
     pk: &ProvingKey,
     public_key: pallas::Base,
     coin_commitment: pallas::Point,
-    value: pallas::Base,
+    value: u64,
     value_blind: ValueBlind,
     coin_blind: ValueBlind,
     sk: pallas::Base,
@@ -102,7 +102,7 @@ fn create_consensus_mint_proof(
         Witness::Base(Value::known(slot)),
         Witness::Base(Value::known(nonce)),
         Witness::Scalar(Value::known(coin_blind)),
-        Witness::Base(Value::known(value)),
+        Witness::Base(Value::known(pallas::Base::from(value))),
         Witness::Scalar(Value::known(value_blind)),
     ];
     let circuit = ZkCircuit::new(prover_witnesses, zkbin.clone());
@@ -234,20 +234,11 @@ pub fn build_stake_tx(
     burn_zkbin: &ZkBinary,
     burn_pk: &ProvingKey,
     slot: u64,
-) -> Result<(
-    ConsensusStakeParams,
-    Vec<Proof>,
-    Vec<SecretKey>,
-    Vec<ConsensusCoin>,
-    Vec<ValueBlind>,
-    Vec<ValueBlind>,
-)> {
+) -> Result<(ConsensusStakeParams, Vec<Proof>, Vec<SecretKey>, Vec<ConsensusCoin>)> {
     let token_blind = ValueBlind::random(&mut OsRng);
     let mut consensus_coins: Vec<ConsensusCoin> = vec![];
     let mut params = ConsensusStakeParams { inputs: vec![], outputs: vec![], token_blind };
     let mut proofs = vec![];
-    let mut own_blinds = vec![];
-    let mut consensus_blinds = vec![];
     // I assumed this vec will contain a secret key for each clear input and anonymous input.
     let mut signature_secrets = vec![];
     for coin in coins.iter() {
@@ -259,8 +250,6 @@ pub fn build_stake_tx(
         }
 
         // Burning own coin
-        let value_blind = ValueBlind::random(&mut OsRng);
-        own_blinds.push(value_blind);
         let spend_hook = pallas::Base::zero();
         let user_data = pallas::Base::zero();
         let user_data_blind = pallas::Base::random(&mut OsRng);
@@ -298,8 +287,6 @@ pub fn build_stake_tx(
         proofs.push(own_proof);
 
         // Generating consensus coin
-        let consensus_value_blind = ValueBlind::random(&mut OsRng);
-        consensus_blinds.push(consensus_value_blind);
         sk_tree.append(&MerkleNode::from(coin.secret.inner()));
         let sk_pos = sk_tree.witness().unwrap();
         let sk_root = sk_tree.root(0).unwrap();
@@ -322,8 +309,8 @@ pub fn build_stake_tx(
             consenus_mint_pk,
             public_key,
             consensus_coin.coin1_commitment,
-            pallas::Base::from(coin.note.value),
-            consensus_value_blind,
+            coin.note.value,
+            coin.note.value_blind,
             consensus_coin_blind,
             coin.secret.inner(),
             sk_root.inner(),
@@ -339,7 +326,7 @@ pub fn build_stake_tx(
         });
         proofs.push(consensus_proof);
     }
-    Ok((params, proofs, signature_secrets, consensus_coins, own_blinds, consensus_blinds))
+    Ok((params, proofs, signature_secrets, consensus_coins))
 }
 
 /// Build consensus contract unstake transaction parameters with the given data:

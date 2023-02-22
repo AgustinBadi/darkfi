@@ -130,24 +130,18 @@ async fn consensus_contract_stake_unstake() -> Result<()> {
     info!(target: "consensus", "[Alice] ====================================================");
     info!(target: "consensus", "[Alice] Building Consensus::Stake params for Alice's owncoin");
     info!(target: "consensus", "[Alice] ====================================================");
-    let (
-        alice_params,
-        alice_proofs,
-        alicedrop_secret_keys,
-        alice_consensus_coins,
-        alice_own_blinds,
-        alice_consensus_blinds,
-    ) = build_stake_tx(
-        &alice_owncoins,
-        &mut th.alice_merkle_tree,
-        &mut th.alice_staked_coins_merkle_tree,
-        &mut th.alice_staked_coins_secrets_merkle_tree,
-        &th.consensus_mint_zkbin,
-        &th.consensus_mint_pk,
-        &th.burn_zkbin,
-        &th.burn_pk,
-        slot,
-    )?;
+    let (alice_params, alice_proofs, alicedrop_secret_keys, _alice_consensus_coins) =
+        build_stake_tx(
+            &alice_owncoins,
+            &mut th.alice_merkle_tree,
+            &mut th.alice_staked_coins_merkle_tree,
+            &mut th.alice_staked_coins_secrets_merkle_tree,
+            &th.consensus_mint_zkbin,
+            &th.consensus_mint_pk,
+            &th.burn_zkbin,
+            &th.burn_pk,
+            slot,
+        )?;
 
     info!(target: "consensus", "[Alice] ===================================");
     info!(target: "consensus", "[Alice] Building stake tx with Alice params");

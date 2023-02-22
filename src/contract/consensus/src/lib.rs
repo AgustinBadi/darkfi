@@ -77,15 +77,15 @@ darkfi_sdk::define_contract!(
 );
 
 // These are the different sled trees that will be created
-pub const CONSENSUS_CONTRACT_MERKLE_TREE: &str = "consensus_coin_tree";
-pub const CONSENSUS_CONTRACT_ROOTS_TREE: &str = "consensus_coin_roots";
-pub const CONSENSUS_CONTRACT_SK_ROOTS_TREE: &str = "consensus_coin_sk_roots";
-pub const CONSENSUS_CONTRACT_NULLIFIERS_TREE: &str = "consensus_nullifiers";
-pub const CONSENSUS_CONTRACT_INFO_TREE: &str = "consensus_info";
+pub const CONSENSUS_CONTRACT_MERKLE_TREE: &str = "coin_tree";
+pub const CONSENSUS_CONTRACT_ROOTS_TREE: &str = "coin_roots";
+pub const CONSENSUS_CONTRACT_SK_ROOTS_TREE: &str = "coin_sk_roots";
+pub const CONSENSUS_CONTRACT_NULLIFIERS_TREE: &str = "nullifiers";
+pub const CONSENSUS_CONTRACT_INFO_TREE: &str = "info";
 
 /// zkas contract namespaces
-pub const CONSENSUS_CONTRACT_ZKAS_MINT_NS_V1: &str = "Consensus_Mint_V1";
-pub const CONSENSUS_CONTRACT_ZKAS_BURN_NS_V1: &str = "Consensus_Burn_V1";
+pub const CONSENSUS_CONTRACT_ZKAS_MINT_NS_V1: &str = "Mint_V1";
+pub const CONSENSUS_CONTRACT_ZKAS_BURN_NS_V1: &str = "Burn_V1";
 
 /// This function runs when the contract is (re)deployed and initialized.
 #[cfg(not(feature = "no-entrypoint"))]
