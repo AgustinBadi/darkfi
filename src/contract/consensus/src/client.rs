@@ -76,7 +76,9 @@ impl ConsensusMintRevealed {
         let value_coord = self.value_commit.to_affine().coordinates().unwrap();
         let value_cm_x = *value_coord.x();
         let value_cm_y = *value_coord.y();
-        vec![value_cm_x, value_cm_y, self.pk, self.commitment_x, self.commitment_y]
+        let coin_commit_coords = [self.commitment_x, self.commitment_y];
+        let coin_commit_hash = poseidon_hash(coin_commit_coords);
+        vec![value_cm_x, value_cm_y, self.pk, coin_commit_hash]
     }
 }
 
@@ -302,7 +304,6 @@ pub fn build_stake_tx(
             cm_tree,
         );
         consensus_coins.push(consensus_coin.clone());
-        let consensus_coin_blind = ValueBlind::random(&mut OsRng);
         let public_key = consensus_coin.pk();
         let (consensus_proof, consensus_revealed) = create_consensus_mint_proof(
             consenus_mint_zkbin,
@@ -311,7 +312,7 @@ pub fn build_stake_tx(
             consensus_coin.coin1_commitment,
             coin.note.value,
             coin.note.value_blind,
-            consensus_coin_blind,
+            consensus_coin.coin1_blind,
             coin.secret.inner(),
             sk_root.inner(),
             pallas::Base::from(slot), // tau

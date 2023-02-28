@@ -36,7 +36,7 @@ circuit "Consensus_Mint_V1" {
 	constrain_instance(ec_get_x(value_commit));
 	constrain_instance(ec_get_y(value_commit));
 
-	# Coin private key hash
+	# Coin public key hash
 	pk = poseidon_hash(PREFIX_PK, sk_root, slot, ZERO);
 	constrain_instance(pk);
 

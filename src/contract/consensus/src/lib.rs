@@ -20,7 +20,7 @@
 use darkfi_sdk::{
     crypto::{
         pallas, pasta_prelude::*, pedersen_commitment_base, Coin, ContractId, MerkleNode,
-        PublicKey, DARK_TOKEN_ID, MONEY_CONTRACT_ID,
+        MerkleTree, PublicKey, DARK_TOKEN_ID, MONEY_CONTRACT_ID,
     },
     db::{db_contains_key, db_init, db_lookup, db_set, SMART_CONTRACT_ZKAS_DB_NAME},
     error::ContractResult,
@@ -77,15 +77,15 @@ darkfi_sdk::define_contract!(
 );
 
 // These are the different sled trees that will be created
+pub const CONSENSUS_CONTRACT_INFO_TREE: &str = "info";
 pub const CONSENSUS_CONTRACT_MERKLE_TREE: &str = "coin_tree";
 pub const CONSENSUS_CONTRACT_ROOTS_TREE: &str = "coin_roots";
 pub const CONSENSUS_CONTRACT_SK_ROOTS_TREE: &str = "coin_sk_roots";
 pub const CONSENSUS_CONTRACT_NULLIFIERS_TREE: &str = "nullifiers";
-pub const CONSENSUS_CONTRACT_INFO_TREE: &str = "info";
 
 /// zkas contract namespaces
-pub const CONSENSUS_CONTRACT_ZKAS_MINT_NS_V1: &str = "Mint_V1";
-pub const CONSENSUS_CONTRACT_ZKAS_BURN_NS_V1: &str = "Burn_V1";
+pub const CONSENSUS_CONTRACT_ZKAS_MINT_NS_V1: &str = "Consensus_Mint_V1";
+pub const CONSENSUS_CONTRACT_ZKAS_BURN_NS_V1: &str = "Consensus_Burn_V1";
 
 /// This function runs when the contract is (re)deployed and initialized.
 #[cfg(not(feature = "no-entrypoint"))]
@@ -98,9 +98,13 @@ fn init_contract(cid: ContractId, _ix: &[u8]) -> ContractResult {
         Err(_) => db_init(cid, SMART_CONTRACT_ZKAS_DB_NAME)?,
     };
 
+    let money_mint_v1_bincode = include_bytes!("../../money/proof/mint_v1.zk.bin");
+    let money_burn_v1_bincode = include_bytes!("../../money/proof/burn_v1.zk.bin");
     let consensus_mint_v1_bincode = include_bytes!("../proof/consensus_mint_v1.zk.bin");
     let consensus_burn_v1_bincode = include_bytes!("../proof/consensus_burn_v1.zk.bin");
 
+    db_set(zkas_db, &serialize(&MONEY_CONTRACT_ZKAS_MINT_NS_V1), &money_mint_v1_bincode[..])?;
+    db_set(zkas_db, &serialize(&MONEY_CONTRACT_ZKAS_BURN_NS_V1), &money_burn_v1_bincode[..])?;
     db_set(
         zkas_db,
         &serialize(&CONSENSUS_CONTRACT_ZKAS_MINT_NS_V1),
@@ -112,12 +116,12 @@ fn init_contract(cid: ContractId, _ix: &[u8]) -> ContractResult {
         &consensus_burn_v1_bincode[..],
     )?;
 
-    // Set up a database tree to hold lead Merkle roots
+    // Set up a database tree to hold Merkle roots
     if db_lookup(cid, CONSENSUS_CONTRACT_ROOTS_TREE).is_err() {
         db_init(cid, CONSENSUS_CONTRACT_ROOTS_TREE)?;
     }
 
-    // Set up a database tree to hold lead Merkle roots
+    // Set up a database tree to hold secret keys Merkle roots
     if db_lookup(cid, CONSENSUS_CONTRACT_SK_ROOTS_TREE).is_err() {
         db_init(cid, CONSENSUS_CONTRACT_SK_ROOTS_TREE)?;
     }
@@ -127,9 +131,17 @@ fn init_contract(cid: ContractId, _ix: &[u8]) -> ContractResult {
         db_init(cid, CONSENSUS_CONTRACT_NULLIFIERS_TREE)?;
     }
 
-    // Set up a database tree to hold info
+    // Set up a database tree for arbitrary data
     if db_lookup(cid, CONSENSUS_CONTRACT_INFO_TREE).is_err() {
-        db_init(cid, CONSENSUS_CONTRACT_INFO_TREE)?;
+        let info_db = db_init(cid, CONSENSUS_CONTRACT_INFO_TREE)?;
+        // Add a Merkle tree to the info db:
+        let coin_tree = MerkleTree::new(100);
+        let mut coin_tree_data = vec![];
+
+        coin_tree_data.write_u32(0)?;
+        coin_tree.encode(&mut coin_tree_data)?;
+
+        db_set(info_db, &serialize(&CONSENSUS_CONTRACT_MERKLE_TREE), &coin_tree_data)?;
     }
 
     Ok(())

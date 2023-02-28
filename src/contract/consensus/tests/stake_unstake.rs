@@ -158,32 +158,21 @@ async fn consensus_contract_stake_unstake() -> Result<()> {
     info!(target: "consensus", "[Faucet] Executing Alice stake tx");
     info!(target: "consensus", "[Faucet] ========================");
     th.faucet_state.read().await.verify_transactions(&[alice_stake_tx.clone()], true).await?;
-    // TODO: verify if this is correct
     th.faucet_merkle_tree.append(&MerkleNode::from(alice_params.outputs[0].coin_commit_hash));
     th.faucet_staked_coins_merkle_tree
-        .append(&MerkleNode::from(alice_params.outputs[0].coin_commit_hash));
-    th.faucet_staked_coins_secrets_merkle_tree
         .append(&MerkleNode::from(alice_params.outputs[0].coin_commit_hash));
 
     info!(target: "consensus", "[Alice] ========================");
     info!(target: "consensus", "[Alice] Executing Alice stake tx");
     info!(target: "consensus", "[Alice] ========================");
     th.alice_state.read().await.verify_transactions(&[alice_stake_tx.clone()], true).await?;
-    // TODO: verify if this is correct
     th.alice_merkle_tree.append(&MerkleNode::from(alice_params.outputs[0].coin_commit_hash));
-    th.alice_staked_coins_merkle_tree
-        .append(&MerkleNode::from(alice_params.outputs[0].coin_commit_hash));
-    th.alice_staked_coins_secrets_merkle_tree
-        .append(&MerkleNode::from(alice_params.outputs[0].coin_commit_hash));
+    th.alice_merkle_tree.witness().unwrap();
 
     assert!(th.faucet_merkle_tree.root(0).unwrap() == th.alice_merkle_tree.root(0).unwrap());
     assert!(
         th.faucet_staked_coins_merkle_tree.root(0).unwrap() ==
             th.alice_staked_coins_merkle_tree.root(0).unwrap()
-    );
-    assert!(
-        th.faucet_staked_coins_secrets_merkle_tree.root(0).unwrap() ==
-            th.alice_staked_coins_secrets_merkle_tree.root(0).unwrap()
     );
 
     // TODO: Execute unstake transaction
