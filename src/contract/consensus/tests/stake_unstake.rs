@@ -26,7 +26,7 @@
 //!
 //! TODO: Malicious cases
 
-use darkfi::{tx::Transaction, Result};
+use darkfi::{consensus::LeadCoin as ConsensusCoin, tx::Transaction, Result};
 use darkfi_sdk::{
     crypto::{
         merkle_prelude::*, pallas, pasta_prelude::*, poseidon_hash, MerkleNode, Nullifier,
@@ -43,7 +43,10 @@ use darkfi_money_contract::{
     MoneyFunction,
 };
 
-use darkfi_consensus_contract::{client::build_stake_tx, ConsensusFunction};
+use darkfi_consensus_contract::{
+    client::{build_stake_tx, EncryptedConsensusNote},
+    ConsensusFunction,
+};
 
 mod harness;
 use harness::{init_logger, ConsensusTestHarness};
@@ -62,7 +65,6 @@ async fn consensus_contract_stake_unstake() -> Result<()> {
     let user_data = pallas::Base::zero();
     let user_data_blind = pallas::Base::random(&mut OsRng);
 
-    let mut alice_owncoins = vec![];
     info!(target: "consensus", "[Faucet] ===================================================");
     info!(target: "consensus", "[Faucet] Building Money::Transfer params for Alice's airdrop");
     info!(target: "consensus", "[Faucet] ===================================================");
@@ -122,7 +124,6 @@ async fn consensus_contract_stake_unstake() -> Result<()> {
         nullifier: Nullifier::from(poseidon_hash([th.alice_kp.secret.inner(), note.serial])),
         leaf_position: alice_leaf_pos,
     };
-    alice_owncoins.push(alice_oc);
 
     // Simulate a stake transaction on slot 1
     let slot = 1;
@@ -130,18 +131,18 @@ async fn consensus_contract_stake_unstake() -> Result<()> {
     info!(target: "consensus", "[Alice] ====================================================");
     info!(target: "consensus", "[Alice] Building Consensus::Stake params for Alice's owncoin");
     info!(target: "consensus", "[Alice] ====================================================");
-    let (alice_params, alice_proofs, alicedrop_secret_keys, _alice_consensus_coins) =
-        build_stake_tx(
-            &alice_owncoins,
-            &mut th.alice_merkle_tree,
-            &mut th.alice_staked_coins_merkle_tree,
-            &mut th.alice_staked_coins_secrets_merkle_tree,
-            &th.consensus_mint_zkbin,
-            &th.consensus_mint_pk,
-            &th.burn_zkbin,
-            &th.burn_pk,
-            slot,
-        )?;
+    let (alice_params, alice_proofs, alicedrop_secret_keys) = build_stake_tx(
+        &[alice_oc.clone()],
+        &mut th.alice_merkle_tree,
+        &mut th.alice_staked_coins_merkle_tree,
+        &mut th.alice_staked_coins_secrets_merkle_tree,
+        &th.consensus_mint_zkbin,
+        &th.consensus_mint_pk,
+        &th.burn_zkbin,
+        &th.burn_pk,
+        slot,
+        &th.alice_kp.public,
+    )?;
 
     info!(target: "consensus", "[Alice] ===================================");
     info!(target: "consensus", "[Alice] Building stake tx with Alice params");
@@ -174,6 +175,31 @@ async fn consensus_contract_stake_unstake() -> Result<()> {
         th.faucet_staked_coins_merkle_tree.root(0).unwrap() ==
             th.alice_staked_coins_merkle_tree.root(0).unwrap()
     );
+
+    // Alice should now have a single ConsensusCoin with her initial airdrop
+    let ciphertext = alice_params.outputs[0].ciphertext.clone();
+    let ephem_public = alice_params.outputs[0].ephem_public;
+    let e_note = EncryptedConsensusNote { ciphertext, ephem_public };
+    let note = e_note.decrypt(&th.alice_kp.secret)?;
+    let secret_key_pos = th.alice_staked_coins_secrets_merkle_tree.witness().unwrap();
+    let secret_key_root = th.alice_staked_coins_secrets_merkle_tree.root(0).unwrap();
+    let secret_key_merkle_path = th
+        .alice_staked_coins_secrets_merkle_tree
+        .authentication_path(secret_key_pos, &secret_key_root)
+        .unwrap();
+    let _consensus_coin = ConsensusCoin::new(
+        note.value,
+        note.slot,           // tau
+        note.secret.inner(), // coin secret key
+        secret_key_root,
+        secret_key_pos.try_into().unwrap(),
+        secret_key_merkle_path,
+        note.serial,
+        &mut th.alice_staked_coins_merkle_tree, // Note: We've already added it to that tree tho
+    );
+
+    assert!(alice_oc.note.value == note.value);
+    assert!(alice_oc.note.token_id == note.token_id);
 
     // TODO: Execute unstake transaction
 

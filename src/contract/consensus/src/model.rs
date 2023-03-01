@@ -17,7 +17,7 @@
  */
 
 use darkfi_money_contract::model::{Input, Output};
-use darkfi_sdk::crypto::{pallas, Coin, MerkleNode, Nullifier, ValueBlind, ValueCommit};
+use darkfi_sdk::crypto::{pallas, Coin, MerkleNode, Nullifier, PublicKey, ValueBlind, ValueCommit};
 use darkfi_serial::{SerialDecodable, SerialEncodable};
 
 /// Inputs and outputs for staking coins
@@ -68,6 +68,10 @@ pub struct StakedOutput {
     pub coin_commit_hash: pallas::Base,
     /// Coin public key hash
     pub coin_pk_hash: pallas::Base,
+    /// The encrypted note ciphertext
+    pub ciphertext: Vec<u8>,
+    /// The ephemeral public key
+    pub ephem_public: PublicKey,
 }
 
 /// State update produced by staking

@@ -25,26 +25,104 @@
 //! takes the necessary objects provided by the caller. This is so we can
 //! abstract away the wallet interface to client implementations.
 
+use chacha20poly1305::{AeadInPlace, ChaCha20Poly1305, KeyInit};
 use darkfi::{
     consensus::LeadCoin as ConsensusCoin,
     zk::{Proof, ProvingKey, Witness, ZkCircuit},
     zkas::ZkBinary,
-    ClientFailed, Result,
+    ClientFailed, Error, Result,
 };
 use darkfi_money_contract::{
     client::{create_transfer_burn_proof, create_transfer_mint_proof, Note, OwnCoin},
     model::{Input, Output},
 };
 use darkfi_sdk::crypto::{
-    merkle_prelude::*, pallas, pasta_prelude::*, pedersen_commitment_base, pedersen_commitment_u64,
-    poseidon_hash, MerkleNode, MerklePosition, MerkleTree, PublicKey, SecretKey, ValueBlind,
-    ValueCommit, DARK_TOKEN_ID,
+    diffie_hellman::{kdf_sapling, sapling_ka_agree},
+    merkle_prelude::*,
+    pallas,
+    pasta_prelude::*,
+    pedersen_commitment_base, pedersen_commitment_u64, poseidon_hash, Keypair, MerkleNode,
+    MerklePosition, MerkleTree, PublicKey, SecretKey, TokenId, ValueBlind, ValueCommit,
+    DARK_TOKEN_ID,
 };
+use darkfi_serial::{Decodable, Encodable, SerialDecodable, SerialEncodable};
 use halo2_proofs::circuit::Value;
 use log::error;
 use rand::rngs::OsRng;
 
 use crate::model::{ConsensusStakeParams, ConsensusUnstakeParams, StakedInput, StakedOutput};
+
+/// Byte length of the AEAD tag of the chacha20 cipher used for note encryption
+pub const AEAD_TAG_SIZE: usize = 16;
+
+/// The `ConsensusNote` holds the inner attributes of a staked `OwnCoin`
+#[derive(Debug, Clone, Eq, PartialEq, SerialEncodable, SerialDecodable)]
+pub struct ConsensusNote {
+    /// Serial number of the coin
+    pub serial: pallas::Base,
+    /// Value of the coin
+    pub value: u64,
+    /// Token ID of the coin
+    pub token_id: TokenId,
+    /// Coin's secret key
+    pub secret: SecretKey,
+    /// Coin's creation slot
+    pub slot: u64,
+}
+
+impl ConsensusNote {
+    /// Encrypt the note to some given `PublicKey` using an AEAD cipher.
+    pub fn encrypt(&self, public_key: &PublicKey) -> Result<EncryptedConsensusNote> {
+        let ephem_keypair = Keypair::random(&mut OsRng);
+        let shared_secret = sapling_ka_agree(&ephem_keypair.secret, public_key);
+        let key = kdf_sapling(&shared_secret, &ephem_keypair.public);
+
+        let mut input = vec![];
+        self.encode(&mut input)?;
+        let input_len = input.len();
+
+        let mut ciphertext = vec![0_u8; input_len + AEAD_TAG_SIZE];
+        ciphertext[..input_len].copy_from_slice(&input);
+
+        ChaCha20Poly1305::new(key.as_ref().into())
+            .encrypt_in_place([0u8; 12][..].into(), &[], &mut ciphertext)
+            .unwrap();
+
+        Ok(EncryptedConsensusNote { ciphertext, ephem_public: ephem_keypair.public })
+    }
+}
+
+/// The `EncryptedConsensusNote` represents a structure holding the ciphertext (which is
+/// an encryption of the `ConsensusNote` object, and the ephemeral `PublicKey` created at
+/// the time when the encryption was done
+#[derive(Debug, Clone, Eq, PartialEq, SerialEncodable, SerialDecodable)]
+pub struct EncryptedConsensusNote {
+    /// Ciphertext of the encrypted `ConsensusNote`
+    pub ciphertext: Vec<u8>,
+    /// Ephemeral public key created at the time of encrypting the note
+    pub ephem_public: PublicKey,
+}
+
+impl EncryptedConsensusNote {
+    /// Attempt to decrypt an `EncryptedConsensusNote` given a secret key.
+    pub fn decrypt(&self, secret: &SecretKey) -> Result<ConsensusNote> {
+        let shared_secret = sapling_ka_agree(secret, &self.ephem_public);
+        let key = kdf_sapling(&shared_secret, &self.ephem_public);
+
+        let ciphertext_len = self.ciphertext.len();
+        let mut plaintext = vec![0_u8; ciphertext_len];
+        plaintext.copy_from_slice(&self.ciphertext);
+
+        match ChaCha20Poly1305::new(key.as_ref().into()).decrypt_in_place(
+            [0u8; 12][..].into(),
+            &[],
+            &mut plaintext,
+        ) {
+            Ok(()) => Ok(ConsensusNote::decode(&plaintext[..ciphertext_len - AEAD_TAG_SIZE])?),
+            Err(e) => Err(Error::NoteDecryptionFailed(e.to_string())),
+        }
+    }
+}
 
 /// Struct representing the public inputs of consensus mint proof
 struct ConsensusMintRevealed {
@@ -236,9 +314,9 @@ pub fn build_stake_tx(
     burn_zkbin: &ZkBinary,
     burn_pk: &ProvingKey,
     slot: u64,
-) -> Result<(ConsensusStakeParams, Vec<Proof>, Vec<SecretKey>, Vec<ConsensusCoin>)> {
+    user_public_key: &PublicKey,
+) -> Result<(ConsensusStakeParams, Vec<Proof>, Vec<SecretKey>)> {
     let token_blind = ValueBlind::random(&mut OsRng);
-    let mut consensus_coins: Vec<ConsensusCoin> = vec![];
     let mut params = ConsensusStakeParams { inputs: vec![], outputs: vec![], token_blind };
     let mut proofs = vec![];
     // I assumed this vec will contain a secret key for each clear input and anonymous input.
@@ -303,7 +381,7 @@ pub fn build_stake_tx(
             coin.note.serial,
             cm_tree,
         );
-        consensus_coins.push(consensus_coin.clone());
+
         let public_key = consensus_coin.pk();
         let (consensus_proof, consensus_revealed) = create_consensus_mint_proof(
             consenus_mint_zkbin,
@@ -318,16 +396,30 @@ pub fn build_stake_tx(
             pallas::Base::from(slot), // tau
             coin.note.serial,         // nonce
         )?;
+
+        // Encrypted note
+        let note = ConsensusNote {
+            serial: coin.note.serial,
+            value: coin.note.value,
+            token_id: coin.note.token_id,
+            secret: coin.secret,
+            slot,
+        };
+
+        let encrypted_note = note.encrypt(&user_public_key)?;
+
         let coin_commit_coords = [consensus_revealed.commitment_x, consensus_revealed.commitment_y];
         let coin_commit_hash = poseidon_hash(coin_commit_coords);
         params.outputs.push(StakedOutput {
             value_commit: consensus_revealed.value_commit,
             coin_commit_hash,
             coin_pk_hash: public_key,
+            ciphertext: encrypted_note.ciphertext,
+            ephem_public: encrypted_note.ephem_public,
         });
         proofs.push(consensus_proof);
     }
-    Ok((params, proofs, signature_secrets, consensus_coins))
+    Ok((params, proofs, signature_secrets))
 }
 
 /// Build consensus contract unstake transaction parameters with the given data:
