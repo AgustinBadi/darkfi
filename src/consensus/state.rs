@@ -20,8 +20,8 @@ use std::time::Duration;
 
 use chrono::{NaiveDateTime, Utc};
 use darkfi_sdk::{
+    bridgetree::BridgeTree,
     crypto::{constants::MERKLE_DEPTH, MerkleNode},
-    incrementalmerkletree::bridgetree::BridgeTree,
     pasta::{group::ff::PrimeField, pallas},
 };
 use darkfi_serial::{deserialize, serialize, SerialDecodable, SerialEncodable};
